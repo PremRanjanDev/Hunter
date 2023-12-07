@@ -2,10 +2,11 @@
   "name": "hunter",
   "version": "1.0.0",
   "description": "Job Hunter",
-  "main": "src/app.js",
+  "main": "src/apply.js",
+  "src": "../src",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node src/app.js"
+    "start": "node src/apply.js"
   },
   "repository": {
     "type": "git",
