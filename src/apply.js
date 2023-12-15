@@ -2,7 +2,48 @@ const fs = require("fs");
 var qnas = require("./resources/qnas.json");
 
 const puppeteer = require("puppeteer");
-const keywords = ["java full stack"];
+
+const jobSearch = [
+  {
+    name: "Java full stack in Singapore",
+    active: true,
+    locations: ["Singapore"],
+    keywords: [
+      "java full stack developer",
+      "java full stack",
+      "full stack developer",
+      "java developer",
+      "java react aws",
+      "java react",
+      "java",
+    ],
+    excludeCompanies: ["Avensys Consulting"],
+    salary: {
+      current: {
+        monthly: "9000",
+        yearly: "108000",
+      },
+      expected: {
+        monthly: "11000",
+        yearly: "130000",
+      },
+    },
+  },
+];
+
+// const keywords = ["java full stack"];
+// const locations = ["Singapore"];
+
+// const expSalYr = {
+//   Singapore: "120000",
+// };
+// const expSalMn = {
+//   Singapore: "11000",
+// };
+// const currSalYr = { Singapore: "108000" };
+// const currSalMn = { Singapore: "9000" };
+// const excludeCompanies = ["Avensys Consulting"];
+
 const tncQuesPhrases = [
   "BY CHECKING THIS BOX, YOU WILL DECLARE THAT YOU READ ",
   "Please check this box to confirm your acknowledgement of our Privacy policy ",
@@ -10,20 +51,13 @@ const tncQuesPhrases = [
   "indicate that you agree to ",
   "I agree to share my ",
 ];
-const locations = ["Singapore"];
-const expSalYr = {
-  Australia: "120000",
-  Singapore: "100000",
-  "European Union": "80000",
-};
-const expSalMn = {
-  Australia: "10000",
-  Singapore: "8500",
-  "European Union": "7000",
-};
-const currSalYr = { Singapore: "120000", "European Union": "100000" };
-const currSalMn = { Singapore: "10000", "European Union": "7000" };
-const excludeCompanies = ["Avensys Consulting"];
+
+const recruiterMsgTemplate = `Hi {{name}},
+I trust you're doing well. I'm interested in the opportunity as {{job_title}} at your organization.
+Happy to connect.
+
+Thanks,
+Prem Ranjan`;
 
 class Applier {
   loadDelay = 2000;
@@ -32,6 +66,10 @@ class Applier {
   success = 0;
   skipped = 0;
   failed = 0;
+  ssDir =
+    "./screenshots/" +
+    new Date().toISOString().slice(0, 19).replace(/[-T:]/g, "-");
+
   delay = (time) => {
     return new Promise(function (resolve) {
       setTimeout(resolve, time);
@@ -56,6 +94,17 @@ class Applier {
       console.log("ERROR(dismiss): " + err);
     }
   };
+  takeScreenshot = async (page, id) => {
+    if (!fs.existsSync(this.ssDir)) {
+      fs.mkdirSync(this.ssDir, { recursive: true });
+    }
+    const currentMillis = new Date().getTime();
+    const path = `${this.ssDir}/${currentMillis}_${id}.png`;
+    await page.screenshot({
+      path,
+    });
+    console.log("Screenshot saved as: ", path);
+  };
   saveQueses = async (ukwnQnas) => {
     console.log("::saveQueses");
     let added = false;
@@ -72,36 +121,37 @@ class Applier {
       console.log("Added queses");
     }
   };
-  getAns = (ques, location) => {
+  getAns = (ques, search) => {
     console.log("::getAns");
     const quesLower = ques.toLowerCase();
     if (
       quesLower.includes("salary") ||
       quesLower.includes("salry") ||
-      quesLower.includes("remuneration")
+      quesLower.includes("remuneration") ||
+      quesLower.includes("compensation")
     ) {
-      return this.getSal(ques, location);
+      return this.getSal(ques, search);
     }
     return qnas[ques];
   };
-  getSal = (salaryQues, location) => {
+  getSal = (ques, search) => {
     console.log("::getSal");
-    let ques = salaryQues.toLowerCase();
-    if (ques.includes("expect") || ques.includes("desired")) {
-      if (ques.includes("year") || ques.includes("annual")) {
-        return expSalYr[location];
+    let salaryQues = ques.toLowerCase();
+    if (salaryQues.includes("expect") || salaryQues.includes("desired")) {
+      if (salaryQues.includes("year") || salaryQues.includes("annual")) {
+        return search.salary.expected.yearly;
       } else {
-        return expSalMn[location];
+        return search.salary.expected.monthly;
       }
     }
-    if (ques.includes("current") || ques.includes("drawn")) {
-      if (ques.includes("year") || ques.includes("annual")) {
-        return currSalYr[location];
+    if (salaryQues.includes("current") || salaryQues.includes("drawn")) {
+      if (salaryQues.includes("year") || salaryQues.includes("annual")) {
+        return search.salary.current.yearly;
       } else {
-        return currSalMn[location];
+        return search.salary.current.monthly;
       }
     }
-    return qnas[salaryQues];
+    return qnas[ques];
   };
   hasInvalidFields = async (page) => {
     return (
@@ -110,11 +160,14 @@ class Applier {
       (await page.$(`li-icon[type="error-pebble-icon"]`))
     );
   };
-  setFields = async (page, location) => {
+  easyApplyModel = async (page) =>
+    await page.$('div[class="jobs-easy-apply-content"]');
+
+  setFields = async (page, search) => {
     console.log("::setFields");
 
     return (
-      (await this.enterAllTextField(page, location)) &&
+      (await this.enterAllTextField(page, search)) &&
       (await this.selectAllRadioBtn(page)) &&
       (await this.selectAllDropDown(page))
     );
@@ -178,9 +231,11 @@ class Applier {
   // };
   selectAllRadioBtn = async (page) => {
     console.log("::selectRadioBtn");
-    const radioBtns = await page.$$(
-      'fieldset[data-test-form-builder-radio-button-form-component="true"]'
-    );
+    const radioBtns =
+      (await page.$$(
+        'fieldset[data-test-form-builder-radio-button-form-component="true"]'
+      )) ||
+      (await page.$$('fieldset[data-test-checkbox-form-component="true"]'));
     let unknownQuest = [];
     for (const radioBtn of radioBtns) {
       try {
@@ -289,7 +344,7 @@ class Applier {
   //   //     await this.saveQueses(unknownQuest);
   //   // }
   // };
-  enterAllTextField = async (page, location) => {
+  enterAllTextField = async (page, search) => {
     console.log("::enterTextField");
     const textFields = await page.$$(
       "div [data-test-single-line-text-form-component]"
@@ -300,7 +355,7 @@ class Applier {
         const ques = await textField.$eval("label", (element) =>
           element.textContent.trim()
         );
-        const ans = this.getAns(ques, location);
+        const ans = this.getAns(ques, search);
         console.log(ques, " : ", ans);
         if (ans) {
           // const cmbBox = await invalid.$('div input[role="combobox"]');
@@ -405,57 +460,73 @@ class Applier {
   selectAllDropDown = async (page) => {
     console.log("::selectDropDown");
     const ddls = await page.$$(
-      "div [data-test-text-entity-list-form-component]"
+      "div[data-test-text-entity-list-form-component]"
     );
     let unknownQuest = [];
     for (const ddl of ddls) {
-      try {
-        const ques = await ddl.$eval(
-          'label span[aria-hidden="true"]',
-          (element) => element.textContent.trim()
-        );
-        const ans = this.getAns(ques);
-        console.log(ques, " : ", ans);
-        if (ans) {
-          const select = await ddl.$("select");
-          if (select) {
-            const options = await select.$$("option");
-            for (const option of options) {
-              let label = await page.evaluate((el) => el.innerText, option);
-              label = label
-                .replace(/\s\s+/g, " ")
-                .replace("\n ", "")
-                .replace("\n", "")
-                .trim();
-              if (label.toLowerCase() === ans.toLowerCase()) {
-                const value = await page.evaluate((el) => el.value, option);
-                await select.select(value);
-                await this.delay(this.inputDelay);
-                break;
-              }
-            }
-          }
+      const select = await ddl.$("select");
+      const ques = await ddl.$eval(
+        'label span[aria-hidden="true"]',
+        (element) => element.textContent.trim()
+      );
+      const ans = this.getAns(ques);
+      console.log(ques, " : ", ans);
+      if (ans) {
+        if (Array.isArray(ans)) {
+          console.log("Required string, found array");
         } else {
-          const ddl = await ddl.$('div select[aria-required="true"]');
-          if (ddl) {
-            let options = await ddl.$$eval("option", (options) =>
-              options.map((option) => option.innerText).join("/")
-            );
-            options = options
-              .replace(/\s\s+/g, " ")
-              .replace("\n ", "")
-              .replace("\n", "")
-              .replaceAll(" / ", "/")
-              .trim();
-            unknownQuest.push({ [ques]: options });
-            if (unknownQuest.length) {
-              await this.saveQueses([{ [ques]: options }]);
-            }
-          }
+          await select.select(ans);
         }
-      } catch (error) {
-        console.log("ERROR(enterTextField): ", error);
+      } else {
+        const options = await select.$$eval(`option`, (els) =>
+          els.map((el) => el.value)
+        );
+        unknownQuest.push({ [ques]: options });
+        if (unknownQuest.length) {
+          await this.saveQueses([{ [ques]: options }]);
+        }
       }
+
+      // try {
+      //   if (ans) {
+      //     if (select) {
+      //       const options = await select.$$("option");
+      //       for (const option of options) {
+      //         let label = await page.evaluate((el) => el.innerText, option);
+      //         label = label
+      //           .replace(/\s\s+/g, " ")
+      //           .replace("\n ", "")
+      //           .replace("\n", "")
+      //           .trim();
+      //         if (label.toLowerCase() === ans.toLowerCase()) {
+      //           const value = await page.evaluate((el) => el.value, option);
+      //           await select.select(value);
+      //           await this.delay(this.inputDelay);
+      //           break;
+      //         }
+      //       }
+      //     }
+      //   } else {
+      //     const select = await ddl.$("select");
+      //     if (select) {
+      //       let options = await ddl.$$eval("option", (options) =>
+      //         options.map((option) => option.innerText).join("/")
+      //       );
+      //       options = options
+      //         .replace(/\s\s+/g, " ")
+      //         .replace("\n ", "")
+      //         .replace("\n", "")
+      //         .replaceAll(" / ", "/")
+      //         .trim();
+      //       unknownQuest.push({ [ques]: options });
+      //       if (unknownQuest.length) {
+      //         await this.saveQueses([{ [ques]: options }]);
+      //       }
+      //     }
+      //   }
+      // } catch (error) {
+      //   console.log("ERROR(enterTextField): ", error);
+      // }
     }
     console.log("unknownQuest.length: ", unknownQuest.length);
     // if (unknownQuest.length) {
@@ -466,9 +537,12 @@ class Applier {
 
   doApply = async (page) => {
     console.log("::doApply");
-    let easyApplyBtn = await page.$("div.jobs-apply-button--top-card button");
-    console.log("Easy Apply Button: " + easyApplyBtn);
+    let easyApplyBtn = await page.$(
+      'div[class="jobs-apply-button--top-card"] button'
+    );
+
     if (!easyApplyBtn) {
+      console.log("Easy Apply button not found");
       return false;
     }
     await easyApplyBtn.click();
@@ -556,7 +630,7 @@ class Applier {
     await submitBtn.click();
     await this.delay(this.loadDelay);
   };
-  connectRecruiter = async (mainPage, browser) => {
+  connectRecruiter = async (mainPage, browser, job) => {
     console.log("::connectRecruiter");
     let profilePage = null;
     try {
@@ -573,14 +647,14 @@ class Applier {
         await profilePage.goto(profileLink);
         await this.delay(this.loadDelay);
         console.log("profilePage: ", profilePage);
-        const name = await profilePage.$eval(
+        const recruiterName = await profilePage.$eval(
           "main section div div div div h1",
           (e) => e.innerText
         );
-        console.log("name: ", name);
+        console.log("name: ", recruiterName);
         // let connectBtn = await profilePage.$(`div[class="pvs-profile-actions "] div[class="pvs-profile-actions__action"] button[aria-label="Invite ${name} to connect"]`);
         let connectBtns = await profilePage.$$(
-          `button[aria-label="Invite ${name} to connect" `
+          `button[aria-label="Invite ${recruiterName} to connect" `
         );
         let connectBtn = null;
         if (connectBtns) {
@@ -605,7 +679,7 @@ class Applier {
             'div[class="pvs-profile-actions "] div div div ul li div[role="button"] li-icon[type="connect"]'
           );
           connectBtn = await profilePage.$(
-            `div[aria-hidden="false"] div ul div[aria-label="Invite ${name} to connect"]`
+            `div[aria-hidden="false"] div ul div[aria-label="Invite ${recruiterName} to connect"]`
           );
         }
         if (connectBtn) {
@@ -613,6 +687,23 @@ class Applier {
           await this.delay(this.loadDelay);
           const inviteModel = await profilePage.$("#send-invite-modal");
           if (inviteModel) {
+            if (job) {
+              const addNoteBtn = await profilePage.$(
+                'button[aria-label="Add a note"]'
+              );
+              if (addNoteBtn) {
+                await addNoteBtn.click();
+                await this.delay(this.loadDelay);
+                const msgTxt = await profilePage.$('textarea[name="message"]');
+                if (msgTxt) {
+                  const recruiterMsg = recruiterMsgTemplate
+                    .replace("{{name}}", recruiterName)
+                    .replace("{{job_title}}", job.jobTitle);
+                  await msgTxt.type(recruiterMsg);
+                  await this.delay(this.loadDelay);
+                }
+              }
+            }
             const sendNow = await profilePage.$(
               'button[aria-label="Send now"]'
             );
@@ -648,7 +739,7 @@ class Applier {
     }
   };
 
-  easyApply = async (page, location, browser) => {
+  easyApply = async (page, search, browser) => {
     console.log("::easyApply");
     for (let pageCount = 1; pageCount < 10; pageCount++) {
       console.log("#Page No.: " + pageCount);
@@ -669,19 +760,22 @@ class Applier {
       // await this.delay(this.clickDelay);
       ids = ids.filter((id) => id);
       console.log(`No of items in page ${pageCount}: ${ids.length}`);
-      const maxNext = 10;
+      const maxNext = 15;
+      let jobTitle = null;
+
       for (let id of ids) {
         try {
+          jobTitle = null;
           console.log("*Item id: " + id);
           const item = await page.$(`#${id}`);
           await item.click();
           await this.delay(this.loadDelay);
           // await this.connectRecruiter(page, browser);
-          const title = await page.$eval(
+          jobTitle = await page.$eval(
             'h2[class="t-24 t-bold job-details-jobs-unified-top-card__job-title"]',
             (element) => element.textContent.trim()
           );
-          console.log("Job title: ", title);
+          console.log("Job title: ", jobTitle);
           const company = await page.$eval(
             'div[class="job-details-jobs-unified-top-card__primary-description-container"] div',
             (element) => element.textContent.trim()
@@ -716,77 +810,85 @@ class Applier {
           // }
 
           let nextCount = 0;
-          let didNext = false;
+          let isInvalid = false;
           do {
-            didNext = false;
-            const nextSet = await this.setFields(page, location);
-            if (nextSet) {
-              didNext = await this.doNext(page, location, id);
-              if (!didNext) {
-                this.failed++;
+            // didNext = false;
+            const easyApplyModel = await this.easyApplyModel(page);
+            if (easyApplyModel) {
+              await this.setFields(page, search);
+              await this.doNext(page, search, id);
+              isInvalid = await this.hasInvalidFields(page);
+              if (isInvalid) {
+                console.log("Still has some invalid fields left to set");
                 break;
               }
+              nextCount++;
             } else {
-              console.log("Next not set: ", nextCount);
               break;
             }
-            nextCount++;
-          } while (nextCount < maxNext && didNext);
-          if (!didNext) {
+          } while (nextCount < maxNext && !isInvalid);
+
+          if (isInvalid) {
             this.failed++;
-            console.log("Next failed");
+            console.log("Could not complete this application.");
+            await this.takeScreenshot(page, id);
             await this.dismiss(page);
             continue;
+          } else {
+            // let reviewCount = 0;
+            // let didReview = false;
+            // do {
+            //   const reviewSet = await this.setFields(page, location);
+            //   if (reviewSet) {
+            //     didReview = await this.doReview(page, location, id);
+            //     if (!didReview) {
+            //       this.failed++;
+            //       break;
+            //     }
+            //   } else {
+            //     console.log("Review not set: ", reviewCount);
+            //     break;
+            //   }
+            //   reviewCount++;
+            // } while (reviewCount < maxReview && didReview);
+            // if (!didReview) {
+            //   console.log("Review failed");
+            //   this.failed++;
+            //   await this.dismiss(page);
+            //   continue;
+            // }
+
+            // const reviewSet = await this.setFields(page, location);
+            // if (reviewSet) {
+            //   const didReview = await this.doReview(page, location, id);
+            //   if (!didReview) {
+            //     this.failed++;
+            //     continue;
+            //   }
+            // } else {
+            //   console.log("Review not set");
+            //   this.failed++;
+            //   continue;
+            // }
+
+            // await this.doSubmit(page);
+            const postApplyDialog =
+              (await page.$("#post-apply-modal")) ||
+              (await page.$('div[role="dialog"]'));
+            if (postApplyDialog) {
+              await this.dismiss(page);
+            }
+            this.success++;
+            await this.connectRecruiter(page, browser, {
+              jobTitle,
+              applied: true,
+            });
           }
-
-          // let reviewCount = 0;
-          // let didReview = false;
-          // do {
-          //   const reviewSet = await this.setFields(page, location);
-          //   if (reviewSet) {
-          //     didReview = await this.doReview(page, location, id);
-          //     if (!didReview) {
-          //       this.failed++;
-          //       break;
-          //     }
-          //   } else {
-          //     console.log("Review not set: ", reviewCount);
-          //     break;
-          //   }
-          //   reviewCount++;
-          // } while (reviewCount < maxReview && didReview);
-          // if (!didReview) {
-          //   console.log("Review failed");
-          //   this.failed++;
-          //   await this.dismiss(page);
-          //   continue;
-          // }
-
-          // const reviewSet = await this.setFields(page, location);
-          // if (reviewSet) {
-          //   const didReview = await this.doReview(page, location, id);
-          //   if (!didReview) {
-          //     this.failed++;
-          //     continue;
-          //   }
-          // } else {
-          //   console.log("Review not set");
-          //   this.failed++;
-          //   continue;
-          // }
-
-          // await this.doSubmit(page);
-          const postApplyDialog = await page.$("#post-apply-modal");
-          if (postApplyDialog) {
-            await this.dismiss(page);
-          }
-          this.success++;
         } catch (err) {
-          this.failed++;
           console.log("ERROR(easyApply): " + err);
+          this.failed++;
           await this.dismiss(page);
-        } finally {
-          await this.connectRecruiter(page, browser);
+          await this.connectRecruiter(page, browser, null);
         }
       }
       console.log("Status: ", {
@@ -798,49 +900,53 @@ class Applier {
   };
   applyAll = async () => {
     console.log("::applyAll");
-    for (const keyword of keywords) {
-      let browser = null;
-      for (const location of locations) {
-        console.log(">Visiting: ", { keyword, location });
-        try {
-          browser = await puppeteer.launch({
-            headless: false,
-            defaultViewport: null,
-            userDataDir: "./user_data",
-            dumpio: true,
-          });
-          const page = await browser.newPage();
-          await page.goto(
-            `https://www.linkedin.com/jobs/search/?f_AL=true&keywords=${keyword}&location=${location}`
-            // { waitUntil: "domcontentloaded" }
-          );
-          await this.delay(this.loadDelay);
-          console.log(page);
-          await this.easyApply(page, location, browser);
-        } catch (err) {
-          console.log("ERROR(applyAll): " + err);
-        } finally {
-          if (browser) {
-            await browser.close();
-            this.delay(this.clickDelay);
-          } else {
-            console.log("Browser not available to close");
-          }
-        }
+    for (const search of jobSearch) {
+      console.log("Job search name: ", search.name);
+      if (!search.active) {
+        console.log("Job not active to search");
+        continue;
       }
-      console.log(`End of locations for '${keyword}'`);
-      console.log("Status: ", {
-        success: this.success,
-        skipped: this.skipped,
-        failed: this.failed,
-      });
+      for (const location of search.locations) {
+        for (const keyword of search.keywords) {
+          console.log(">Searching: ", { keyword, location });
+          let browser = null;
+          try {
+            browser = await puppeteer.launch({
+              headless: false,
+              defaultViewport: null,
+              userDataDir: "./user_data",
+              dumpio: true,
+            });
+            const page = await browser.newPage();
+            await page.goto(
+              `https://www.linkedin.com/jobs/search/?f_AL=true&keywords=${keyword}&location=${location}`
+              // { waitUntil: "domcontentloaded" }
+            );
+            await this.delay(this.loadDelay);
+            console.log(page);
+            await this.easyApply(page, search, browser);
+          } catch (err) {
+            console.log("ERROR(applyAll): " + err);
+          } finally {
+            if (browser) {
+              await browser.close();
+              this.delay(this.clickDelay);
+            } else {
+              console.log("Browser not available to close");
+            }
+          }
+          console.log(`End of keyword '${keyword}' for location '${location}'`);
+          console.log("Status: ", {
+            success: this.success,
+            skipped: this.skipped,
+            failed: this.failed,
+          });
+        }
+        console.log(`End of location: '${location}'`);
+      }
+      console.log(`End of search: '${search.name}'`);
     }
-    console.log("End of keywords");
-    console.log("Status: ", {
-      success: this.success,
-      skipped: this.skipped,
-      failed: this.failed,
-    });
+    console.log("End of Job Search");
   };
 }
 const applier = new Applier();
