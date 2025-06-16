@@ -8,15 +8,7 @@ const jobSearch = [
     name: "Java full stack in Singapore",
     active: true,
     locations: ["Singapore"],
-    keywords: [
-      "java react",
-      "java react aws",
-      "java full stack developer",
-      "java full stack",
-      "full stack developer",
-      "java developer",
-      "java",
-    ],
+    keywords: ["java"],
     salary: {
       current: {
         monthly: "8500",
@@ -84,12 +76,12 @@ class Applier {
       console.log("ERROR(dismiss): " + err);
     }
   };
-  takeScreenshot = async (page, id) => {
+  takeScreenshot = async (page, name) => {
     if (!fs.existsSync(this.ssDir)) {
       fs.mkdirSync(this.ssDir, { recursive: true });
     }
     const currentMillis = new Date().getTime();
-    const path = `${this.ssDir}/${currentMillis}_${id}.png`;
+    const path = `${this.ssDir}/${currentMillis}_${name}.png`;
     await page.screenshot({
       path,
     });
@@ -151,7 +143,7 @@ class Applier {
     );
   };
   easyApplyModel = async (page) =>
-    await page.$('div[class="jobs-easy-apply-content"]');
+    await page.$('div[class*="jobs-easy-apply-modal"]');
 
   setFields = async (page, search) => {
     console.log("::setFields");
@@ -299,7 +291,7 @@ class Applier {
     await this.delay(this.loadDelay);
     return true;
   };
-  doNext = async (page, location, id) => {
+  doNext = async (page) => {
     console.log("::doNext");
     const nextBtnSelector = 'button[aria-label="Continue to next step"]';
     const reviewBtnSelector = 'button[aria-label="Review your application"]';
@@ -444,37 +436,64 @@ class Applier {
         console.log("No more page");
         return;
       }
-      let ids = await page.evaluate(() =>
-        Array.from(
-          document.querySelectorAll("ul.scaffold-layout__list-container li"),
-          (element) => element.id
-        )
+
+      const jobCards = await page.$$(
+        "div > ul > li[class*='scaffold-layout__list-item']"
       );
-      ids = ids.filter((id) => id);
-      console.log(`No of items in page ${pageCount}: ${ids.length}`);
+
+      console.log(`No of items in page ${pageCount}: ${jobCards.length}`);
       const maxNext = 15;
       let jobTitle = null;
 
-      for (let id of ids) {
+      for (let jobCard of jobCards) {
         try {
-          jobTitle = null;
-          console.log("*Item id: " + id);
-          const item = await page.$(`#${id}`);
-          await item.click();
-          await this.delay(this.loadDelay);
-          jobTitle = await page.$eval(
-            'h2[class="t-24 t-bold job-details-jobs-unified-top-card__job-title"]',
-            (element) => element.textContent.trim()
+          await jobCard.evaluate((el) =>
+            el.scrollIntoView({ behavior: "smooth", block: "center" })
           );
+
+          const cardText = await jobCard.evaluate((el) =>
+            el.textContent.trim()
+          );
+          const cardContent = cardText.replace(/\s*\n+\s*/g, "\n").trim();
+
+          console.log(
+            "---------------- Job card content ----------------\n" +
+              cardContent +
+              "\n================================================"
+          );
+
+          if (cardContent.includes("Applied")) {
+            console.log("Job already applied: ");
+            this.skipped++;
+            continue;
+          }
+
+          await jobCard.click();
+          await this.delay(this.loadDelay);
+          const jobDetailsPanel = await page.$(
+            'div[class="jobs-search__job-details--wrapper"'
+          );
+
+          jobTitle = await jobDetailsPanel.evaluate((panel) => {
+            const jobTitleElement = panel.querySelector(
+              "div[class*='job-title'] a"
+            );
+            return jobTitleElement ? jobTitleElement.textContent.trim() : null;
+          });
+
           console.log("Job title: ", jobTitle);
           if (jobTitle?.toLowerCase().includes("singaporeans only")) {
             console.log("Job for Singaporeans only, skipping...");
             continue;
           }
-          const company = await page.$eval(
-            'div[class="job-details-jobs-unified-top-card__primary-description-container"] div a',
-            (element) => element.textContent.trim()
-          );
+
+          const company = await jobDetailsPanel.evaluate((panel) => {
+            const companyElement = panel.querySelector(
+              "div[class*='company-name'] a"
+            );
+            return companyElement ? companyElement.textContent.trim() : null;
+          });
+
           console.log("Company: ", company);
           if (
             company &&
@@ -497,14 +516,15 @@ class Applier {
             const easyApplyModel = await this.easyApplyModel(page);
             if (easyApplyModel) {
               await this.setFields(page, search);
-              await this.doNext(page, search, id);
+              await this.doNext(page);
               isInvalid = await this.hasInvalidFields(page);
               if (isInvalid) {
-                console.log("Still has some invalid fields left to set");
+                console.log("All mandatory fields are not set");
                 break;
               }
               nextCount++;
             } else {
+              console.log("Failed to open easy apply model: ", easyApplyModel);
               break;
             }
           } while (nextCount < maxNext && !isInvalid);
@@ -512,7 +532,7 @@ class Applier {
           if (isInvalid) {
             this.failed++;
             console.log("Could not complete this application.");
-            await this.takeScreenshot(page, id);
+            await this.takeScreenshot(page, jobTitle);
             await this.dismiss(page);
             continue;
           } else {
@@ -558,13 +578,30 @@ class Applier {
           console.log(">Searching: ", { keyword, location });
           let browser = null;
           try {
+            // browser = await puppeteer.launch({
+            //   headless: false,
+            //   // executablePath: "/path/to/chrome",
+            //   defaultViewport: null,
+            //   userDataDir: "./user_data",
+            //   dumpio: true,
+            // });
+            // browser = await puppeteer.launch({
+            //   headless: false,
+            //   executablePath: "/usr/bin/google-chrome", // Adjust path based on OS
+            //   defaultViewport: null,
+            //   userDataDir: "./user_data",
+            //   dumpio: true,
+            // });
             browser = await puppeteer.launch({
               headless: false,
-              // executablePath: "/path/to/chrome",
-              defaultViewport: null,
               userDataDir: "./user_data",
               dumpio: true,
+              defaultViewport: null,
+              executablePath:
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+              args: ["--no-sandbox", "--disable-setuid-sandbox"],
             });
+
             const page = await browser.newPage();
             await page.goto(
               `https://www.linkedin.com/jobs/search/?f_AL=true&keywords=${keyword}&location=${location}`
